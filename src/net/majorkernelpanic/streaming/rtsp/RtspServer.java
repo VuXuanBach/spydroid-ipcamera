@@ -38,11 +38,22 @@ import java.util.regex.Pattern;
 
 import net.majorkernelpanic.streaming.Session;
 import net.majorkernelpanic.streaming.SessionBuilder;
+
+import org.fourthline.cling.android.AndroidUpnpService;
+import org.fourthline.cling.android.AndroidUpnpServiceImpl;
+import org.fourthline.cling.support.igd.PortMappingListener;
+import org.fourthline.cling.support.model.PortMapping;
+
 import android.app.Service;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.Editor;
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener;
+import android.net.wifi.WifiInfo;
+import android.net.wifi.WifiManager;
 import android.os.Binder;
 import android.os.IBinder;
 import android.preference.PreferenceManager;
@@ -164,6 +175,11 @@ public class RtspServer extends Service {
 			}
 		}
 		mRestart = false;
+		
+		getApplicationContext().bindService(
+				new Intent(this,
+						AndroidUpnpServiceImpl.class),
+				serviceConnection, Context.BIND_AUTO_CREATE);
 	}
 
 	/** 
@@ -650,5 +666,53 @@ public class RtspServer extends Service {
 			output.write(response.getBytes());
 		}
 	}
+	
+	private AndroidUpnpService mUpnpServiceUDP, mUpnpServiceTCP;
+	private PortMappingListener mRegistryListenerUDP, mRegistryListenerTCP;
+	private String mIpAddress;
+	
+	private String intToIP(int i) {
+		return ((i & 0xFF) + "." + ((i >> 8) & 0xFF) + "." + ((i >> 16) & 0xFF)
+				+ "." + ((i >> 24) & 0xFF));
+	}
+	
+	private ServiceConnection serviceConnection = new ServiceConnection() {
+
+		@Override
+		public void onServiceConnected(ComponentName className, IBinder service) {
+			WifiManager mWifiManager = (WifiManager) getSystemService(Context.WIFI_SERVICE);
+			WifiInfo mWifiInfo = mWifiManager.getConnectionInfo();
+			mIpAddress = intToIP(mWifiInfo.getIpAddress());
+			
+			
+			// TCP
+			mUpnpServiceTCP = (AndroidUpnpService) service;
+			PortMapping desiredMappingTCP = new PortMapping(mPort,
+					mIpAddress, PortMapping.Protocol.TCP, "Spydroid");
+			
+			mRegistryListenerTCP = new PortMappingListener(desiredMappingTCP);
+			
+			mUpnpServiceTCP.getRegistry().addListener(mRegistryListenerTCP);
+
+			mUpnpServiceTCP.getControlPoint().search();
+			
+			
+			// UDP
+			mUpnpServiceUDP = (AndroidUpnpService) service;
+			PortMapping desiredMappingUDP = new PortMapping(mPort,
+					mIpAddress, PortMapping.Protocol.UDP, "Spydroid");
+
+			mRegistryListenerUDP = new PortMappingListener(desiredMappingUDP);
+
+			mUpnpServiceUDP.getRegistry().addListener(mRegistryListenerUDP);
+
+			mUpnpServiceUDP.getControlPoint().search();
+		}
+
+		@Override
+		public void onServiceDisconnected(ComponentName className) {
+//			mUpnpServiceUDP = null;
+		}
+	};
 
 }
